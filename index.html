@@ -24567,13 +24567,6 @@ function buildLetterhead(data) {
     border: noSepBorder,
     children: [],
   }));
-  // Extra line to clear the floating seal (~1.05" tall from top margin)
-  headerChildren.push(new docx.Paragraph({
-    spacing: { before: 0, after: 0, line: AR25_50.LINE },
-    border: noSepBorder,
-    children: [],
-  }));
-
   return new docx.Header({
     children: headerChildren,
   });
@@ -24584,7 +24577,8 @@ function buildLetterhead(data) {
 // AR 25-50 para 2-4a(3)(b): date on same line as office symbol, flush right
 function buildOfficeSymbolAndDate(data) {
   const paras = [];
-  // Office symbol is the first element in the body (letterhead is in the header)
+  // Blank line at top of body to clear the floating seal in the header
+  paras.push(emptyPara());
 
   const dateStr = formatDateAR25(data.date);
   const offSym = data.officeSymbol || '';
@@ -25053,38 +25047,45 @@ function updatePreview() {
   // Office symbol (left) and date (right) on same line
   html += `<div class="office-date-line"><span>${escapeHtml(data.officeSymbol || '')}</span><span>${escapeHtml(formatDateAR25(data.date))}</span></div>`;
 
-  // Type-specific content
+  // Type-specific content (matches DOCX section builders exactly)
   switch (data.documentType) {
     case 'memorandum':
     case 'transmittal':
       if (data.memorandumFor.length > 0) {
-        html += '<div class="spacer"></div><div class="spacer"></div>'; // 2 blank lines (3rd line below)
+        html += '<div class="spacer"></div><div class="spacer"></div>';
         html += `<p>MEMORANDUM FOR ${escapeHtml(data.memorandumFor[0])}</p>`;
-        data.memorandumFor.slice(1).forEach(a => { html += `<p style="margin-left:2em">${escapeHtml(a)}</p>`; });
+        data.memorandumFor.slice(1).forEach(a => { html += `<p style="margin-left:0.5in">${escapeHtml(a)}</p>`; });
       }
       if (data.thru.length > 0) {
         html += `<p>THRU ${escapeHtml(data.thru[0])}</p>`;
-        data.thru.slice(1).forEach(a => { html += `<p style="margin-left:2em">${escapeHtml(a)}</p>`; });
+        data.thru.slice(1).forEach(a => { html += `<p style="margin-left:0.5in">${escapeHtml(a)}</p>`; });
       }
       if (data.subject) html += `<div class="spacer"></div><p>SUBJECT:  ${escapeHtml(data.subject)}</p>`;
       break;
     case 'letter':
-      html += '<div class="spacer"></div><div class="spacer"></div>'; // 2 blank lines
+      html += '<div class="spacer"></div><div class="spacer"></div>';
       data.memorandumFor.forEach(a => { html += `<p>${escapeHtml(a)}</p>`; });
       if (data.salutation) html += `<div class="spacer"></div><p>${escapeHtml(data.salutation)}</p>`;
       break;
     case 'endorsement':
-      html += `<div class="spacer"></div><div class="spacer"></div><div style="text-align:center">${ordinalEndorsement(data.endorsementNumber || 1).toUpperCase()} ENDORSEMENT</div>`;
-      if (data.endorsingOffice) html += `<div class="spacer"></div><p>${escapeHtml(data.endorsingOffice)}</p>`;
+      // DOCX: 1 blank, centered endorsement, 1 blank, endorsing office, then buildMemoForLine (2 blanks + MEMO FOR)
+      html += `<div class="spacer"></div><div style="text-align:center">${ordinalEndorsement(data.endorsementNumber || 1).toUpperCase()} ENDORSEMENT</div>`;
+      html += '<div class="spacer"></div>';
+      if (data.endorsingOffice) html += `<p>${escapeHtml(data.endorsingOffice)}</p>`;
       html += '<div class="spacer"></div><div class="spacer"></div>';
       if (data.memorandumFor.length > 0) {
         html += `<p>MEMORANDUM FOR ${escapeHtml(data.memorandumFor[0])}</p>`;
       }
+      if (data.thru.length > 0) {
+        html += `<p>THRU ${escapeHtml(data.thru[0])}</p>`;
+        data.thru.slice(1).forEach(a => { html += `<p style="margin-left:0.5in">${escapeHtml(a)}</p>`; });
+      }
       if (data.originalSubject) html += `<div class="spacer"></div><p>SUBJECT:  ${escapeHtml(data.originalSubject)}</p>`;
       break;
     case 'moa':
+      html += '<div class="spacer"></div><div class="spacer"></div>';
       const moaPreviewTitle = (data.moaType === 'mou') ? 'MEMORANDUM OF UNDERSTANDING' : 'MEMORANDUM OF AGREEMENT';
-      html += `<div class="spacer"></div><div class="spacer"></div><div style="text-align:center">${moaPreviewTitle}</div>`;
+      html += `<div style="text-align:center">${moaPreviewTitle}</div>`;
       if (data.parties) {
         html += `<div style="text-align:center">BETWEEN</div>`;
         data.parties.forEach((p, i) => {
@@ -25092,7 +25093,7 @@ function updatePreview() {
           html += `<div style="text-align:center">${escapeHtml(p)}</div>`;
         });
       }
-      if (data.subject) html += `<div class="spacer"></div><p>SUBJECT:${escapeHtml(data.subject)}</p>`;
+      if (data.subject) html += `<div class="spacer"></div><p>SUBJECT:  ${escapeHtml(data.subject)}</p>`;
       break;
   }
 
@@ -25125,18 +25126,26 @@ function updatePreview() {
     });
   }
 
-  // Signature block
-  if (data.documentType === 'letter' && data.complimentaryClose) {
+  // Signature block (matches DOCX builders: buildSignatureBlock / buildLetterClose)
+  if (data.documentType === 'letter') {
+    // buildLetterClose: 2 blank lines, close (indented), 4 blank lines, name/rank/title (mixed case)
     html += '<div class="spacer"></div><div class="spacer"></div>';
-    html += `<div class="sig-block">${escapeHtml(data.complimentaryClose)}</div>`;
+    if (data.complimentaryClose) {
+      html += `<div class="sig-block">${escapeHtml(data.complimentaryClose)}</div>`;
+    }
+    html += '<div class="spacer"></div><div class="spacer"></div><div class="spacer"></div><div class="spacer"></div>';
+    if (data.signatureBlock.name) html += `<div class="sig-block">${escapeHtml(data.signatureBlock.name)}</div>`;
+    if (data.signatureBlock.rank) html += `<div class="sig-block">${escapeHtml(data.signatureBlock.rank)}</div>`;
+    if (data.signatureBlock.title) html += `<div class="sig-block">${escapeHtml(data.signatureBlock.title)}</div>`;
+  } else {
+    // buildSignatureBlock: 4 blank lines, NAME (uppercase)/rank/title
+    html += '<div class="spacer"></div><div class="spacer"></div><div class="spacer"></div><div class="spacer"></div>';
+    if (data.signatureBlock.name) html += `<div class="sig-block">${escapeHtml(data.signatureBlock.name.toUpperCase())}</div>`;
+    if (data.signatureBlock.rank) html += `<div class="sig-block">${escapeHtml(data.signatureBlock.rank)}</div>`;
+    if (data.signatureBlock.title) html += `<div class="sig-block">${escapeHtml(data.signatureBlock.title)}</div>`;
   }
-  html += '<div class="spacer"></div><div class="spacer"></div><div class="spacer"></div><div class="spacer"></div>';
-  const sigNameDisplay = data.documentType === 'letter' ? data.signatureBlock.name : data.signatureBlock.name.toUpperCase();
-  if (data.signatureBlock.name) html += `<div class="sig-block">${escapeHtml(sigNameDisplay)}</div>`;
-  if (data.signatureBlock.rank) html += `<div class="sig-block">${escapeHtml(data.signatureBlock.rank)}</div>`;
-  if (data.signatureBlock.title) html += `<div class="sig-block">${escapeHtml(data.signatureBlock.title)}</div>`;
 
-  // Additional sigs for MOA
+  // Additional sigs for MOA (buildAdditionalSignatures: 4 blank lines per sig)
   if (data.documentType === 'moa' && data.additionalSignatures) {
     data.additionalSignatures.forEach(sig => {
       html += '<div class="spacer"></div><div class="spacer"></div><div class="spacer"></div><div class="spacer"></div>';
