@@ -177,7 +177,7 @@ textarea { resize: vertical; min-height: 60px; }
             <li>Open it in Word, review, print, and sign</li>
           </ol>
           <p><strong>Not sure what to put?</strong> Click <strong>Load Example</strong> in the top bar to see a filled-out memo you can edit.</p>
-          <p style="margin-top:0.5rem"><strong>Tips:</strong> Subject and office symbol are auto-capitalized. Two spaces after periods are added automatically. The tool warns you if something doesn't look right before generating.</p>
+          <p style="margin-top:0.5rem"><strong>Tips:</strong> Subject and office symbol are auto-capitalized. Punctuation spacing is corrected automatically. The tool warns you if something doesn't look right before generating.</p>
         </div>
       </details>
     </div>
@@ -24145,11 +24145,11 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-// AR 25-50 para 1-39b(9): two spaces after periods and question marks
+// AR 25-50 para 1-39b(9), as revised 4 October 2024: ONE space after ending punctuation.
+// The 2024 administrative revision changed this from two spaces back to one.
 function fixPunctuationSpacing(text) {
   return text
-    .replace(/([.?])\s{1}(?=[A-Z])/g, '$1  ')   // single space before capital → two spaces
-    .replace(/([.?])\s{3,}(?=[A-Z])/g, '$1  ');  // 3+ spaces → two spaces
+    .replace(/([.?])\s{2,}(?=[A-Z])/g, '$1 ');  // 2+ spaces after period/question mark → one space
 }
 
 // ============================================
@@ -24311,18 +24311,6 @@ function validateFormData(data) {
   // Signature rank (military personnel)
   if (data.signatureBlock && data.signatureBlock.name && !data.signatureBlock.rank) {
     warnings.push({ field: 'sigRank', message: 'Military personnel should include rank and branch (e.g., "PFC, Infantry"). Civilians use title only.', reference: 'para 6-4a(2)' });
-  }
-
-  // Two spaces after periods in body text
-  if (data.body && data.body.length > 0) {
-    const hasingleSpaceAfterPeriod = data.body.some(p =>
-      /\.[^ \n]/.test(p.text) === false && /\. [^ ]/.test(p.text)
-    );
-    // Only check for the pattern: period followed by exactly one space then a capital letter (new sentence)
-    const badSpacing = data.body.some(p => /\. [A-Z]/.test(p.text));
-    if (badSpacing) {
-      warnings.push({ field: 'body', message: 'AR 25-50 requires two spaces after periods and question marks.', reference: 'para 1-39b(9)' });
-    }
   }
 
   // POC in last paragraph
