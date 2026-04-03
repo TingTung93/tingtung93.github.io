@@ -140,6 +140,7 @@ textarea { resize: vertical; min-height: 60px; }
       <option value="request-for-training">School Request (CPT Donovan, 3-75 RGR)</option>
     </select>
     <button class="btn btn-danger" onclick="clearForm()">Clear</button>
+    <a class="btn btn-outline" href="https://github.com/TingTung93/ArmyWriterTool/issues/new?template=bug_report.md" target="_blank" rel="noopener" style="text-decoration:none">Report Problem</a>
   </div>
 </header>
 
@@ -24452,8 +24453,9 @@ function getSealData(data) {
   return { b64: DOD_SEAL_BASE64, type: 'png' };
 }
 
-// Build letterhead as body content (table with seal + centered text)
-// Placed in document body, NOT in Word header, to avoid default header separator line
+// Build letterhead as a proper Word Header element (not body content).
+// The last paragraph has border.bottom explicitly set to NONE to suppress
+// the default Word header separator line.
 function buildLetterhead(data) {
   const seal = getSealData(data);
   const sealBytes = Uint8Array.from(atob(seal.b64), c => c.charCodeAt(0));
@@ -24461,7 +24463,6 @@ function buildLetterhead(data) {
   const sealPx = Math.round(AR25_50.SEAL_SIZE * 96);
 
   // Auto-shrink font for long text to keep letterhead compact
-  // size is in half-points: 20=10pt, 18=9pt, 16=8pt, 14=7pt
   function lhSize(text, baseSize) {
     if (text.length > 100) return Math.max(baseSize - 4, 12);
     if (text.length > 70) return Math.max(baseSize - 2, 14);
@@ -24502,11 +24503,9 @@ function buildLetterhead(data) {
     right: { style: docx.BorderStyle.NONE, size: 0 },
   };
 
-  const totalWidth = inch(textWidth);
-
   const letterheadTable = new docx.Table({
     layout: docx.TableLayoutType.FIXED,
-    width: { size: totalWidth, type: docx.WidthType.DXA },
+    width: { size: inch(textWidth), type: docx.WidthType.DXA },
     columnWidths: [sealColWidth, centerColWidth, rightColWidth],
     rows: [
       new docx.TableRow({
@@ -24553,7 +24552,24 @@ function buildLetterhead(data) {
     },
   });
 
-  return [letterheadTable];
+  // Trailing paragraph with all borders explicitly NONE.
+  // This is the last element in the header — Word applies its default
+  // separator line to the bottom border of this paragraph. Setting it
+  // to NONE suppresses the line.
+  const noSeparatorPara = new docx.Paragraph({
+    spacing: { after: 0, before: 0, line: 20 },
+    border: {
+      top: { style: docx.BorderStyle.NONE, size: 0, space: 0, color: 'FFFFFF' },
+      bottom: { style: docx.BorderStyle.NONE, size: 0, space: 0, color: 'FFFFFF' },
+      left: { style: docx.BorderStyle.NONE, size: 0, space: 0, color: 'FFFFFF' },
+      right: { style: docx.BorderStyle.NONE, size: 0, space: 0, color: 'FFFFFF' },
+    },
+    children: [],
+  });
+
+  return new docx.Header({
+    children: [letterheadTable, noSeparatorPara],
+  });
 }
 
 // Office symbol (left) and date (right) on the SAME line
@@ -24884,10 +24900,10 @@ function generateDocx() {
 
   let children = [];
 
-  // Letterhead in document body (not Word header — avoids separator line)
-  children.push(...buildLetterhead(data));
+  // Letterhead as a proper Word Header element
+  const documentHeader = buildLetterhead(data);
 
-  // Office symbol/date below letterhead
+  // Body starts with office symbol/date
   children.push(...buildOfficeSymbolAndDate(data));
 
   switch (data.documentType) {
@@ -24984,6 +25000,9 @@ function generateDocx() {
             right: inch(AR25_50.MARGIN_RIGHT),
           },
         },
+      },
+      headers: {
+        default: documentHeader,
       },
       children: children,
     }],
