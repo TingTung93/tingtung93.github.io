@@ -24453,122 +24453,129 @@ function getSealData(data) {
   return { b64: DOD_SEAL_BASE64, type: 'png' };
 }
 
-// Build letterhead as a proper Word Header element (not body content).
-// The last paragraph has border.bottom explicitly set to NONE to suppress
-// the default Word header separator line.
+// Build letterhead as a proper Word Header, matching the HQDA J6 template exactly.
+// Key formatting from AR25-50-Memo-template-09OCT25.dotx:
+//   - Seal: floating anchor image, 1.05" x 1.05", positioned absolutely on page
+//   - "Department of the Army": Arial Bold 12pt, ALL CAPS, centered
+//   - Organization/unit lines: Arial Bold 10pt, ALL CAPS, centered
+//   - Line spacing: very tight (line=40, ~2pt atLeast)
+//   - No table — centered paragraphs with floating image
 function buildLetterhead(data) {
   const seal = getSealData(data);
   const sealBytes = Uint8Array.from(atob(seal.b64), c => c.charCodeAt(0));
   const agencyTitle = getAgencyTitle(data);
-  const sealPx = Math.round(AR25_50.SEAL_SIZE * 96);
 
-  // Auto-shrink font for long text to keep letterhead compact
+  // HQDA template seal: absolute EMU values from the template
+  // 995680 EMU = 1.045" (cx and cy in wp:extent)
+  // docx.js ImageRun transformation uses pixels; 1 inch = 914400 EMU = 96px
+  // So 995680 EMU / 914400 * 96 = 104.5px
+  const SEAL_EMU = 995680;
+  const SEAL_H_OFFSET = 426720;  // 0.47" from page edge
+  const SEAL_V_OFFSET = 457200;  // 0.5" from top margin
+  const sealPx = Math.round(SEAL_EMU / 914400 * 96); // 104px
+
+  // Tight line spacing matching HQDA ALLCAPS style: line=40, lineRule=atLeast
+  const lhSpacing = { before: 0, after: 0, line: 40, lineRule: docx.LineRuleType.AT_LEAST };
+
+  // Auto-shrink for very long text
   function lhSize(text, baseSize) {
-    if (text.length > 100) return Math.max(baseSize - 4, 12);
-    if (text.length > 70) return Math.max(baseSize - 2, 14);
+    if (text.length > 100) return Math.max(baseSize - 4, 14);
+    if (text.length > 70) return Math.max(baseSize - 2, 16);
     return baseSize;
   }
 
-  const textParas = [];
-  textParas.push(makePara(makeRun(agencyTitle, { bold: true, size: lhSize(agencyTitle, 20) }), {
+  // First paragraph: floating seal image + "DEPARTMENT OF THE ARMY" text
+  // The seal is a floating anchor behind text, positioned absolutely
+  const firstPara = new docx.Paragraph({
     alignment: docx.AlignmentType.CENTER,
-  }));
-  if (data.letterhead.unitName) {
-    const unitText = data.letterhead.unitName.toUpperCase();
-    textParas.push(makePara(makeRun(unitText, { bold: true, size: lhSize(unitText, 18) }), {
-      alignment: docx.AlignmentType.CENTER,
-    }));
-  }
-  if (data.letterhead.subUnit) {
-    textParas.push(makePara(makeRun(data.letterhead.subUnit, { size: lhSize(data.letterhead.subUnit, 18) }), {
-      alignment: docx.AlignmentType.CENTER,
-    }));
-  }
-  if (data.letterhead.installation) {
-    textParas.push(makePara(makeRun(data.letterhead.installation, { size: lhSize(data.letterhead.installation, 18) }), {
-      alignment: docx.AlignmentType.CENTER,
-    }));
-  }
-
-  const leftMargin = (data.options && data.options.leftMarginInches) || AR25_50.MARGIN_LEFT_STANDARD;
-  const textWidth = AR25_50.PAGE_WIDTH - leftMargin - AR25_50.MARGIN_RIGHT;
-  const sealColWidth = inch(0.9);
-  const centerColWidth = inch(textWidth - 1.8);
-  const rightColWidth = inch(0.9);
-
-  const noBorders = {
-    top: { style: docx.BorderStyle.NONE, size: 0 },
-    bottom: { style: docx.BorderStyle.NONE, size: 0 },
-    left: { style: docx.BorderStyle.NONE, size: 0 },
-    right: { style: docx.BorderStyle.NONE, size: 0 },
-  };
-
-  const letterheadTable = new docx.Table({
-    layout: docx.TableLayoutType.FIXED,
-    width: { size: inch(textWidth), type: docx.WidthType.DXA },
-    columnWidths: [sealColWidth, centerColWidth, rightColWidth],
-    rows: [
-      new docx.TableRow({
-        children: [
-          new docx.TableCell({
-            width: { size: sealColWidth, type: docx.WidthType.DXA },
-            verticalAlign: docx.VerticalAlign.CENTER,
-            borders: noBorders,
-            children: [
-              new docx.Paragraph({
-                spacing: { after: 0, before: 0 },
-                children: [
-                  new docx.ImageRun({
-                    data: sealBytes,
-                    transformation: { width: sealPx, height: sealPx },
-                    type: seal.type,
-                  }),
-                ],
-              }),
-            ],
-          }),
-          new docx.TableCell({
-            width: { size: centerColWidth, type: docx.WidthType.DXA },
-            verticalAlign: docx.VerticalAlign.CENTER,
-            borders: noBorders,
-            children: textParas,
-          }),
-          new docx.TableCell({
-            width: { size: rightColWidth, type: docx.WidthType.DXA },
-            verticalAlign: docx.VerticalAlign.CENTER,
-            borders: noBorders,
-            children: [makePara(makeRun(''))],
-          }),
-        ],
+    spacing: lhSpacing,
+    children: [
+      new docx.ImageRun({
+        data: sealBytes,
+        transformation: { width: sealPx, height: sealPx },
+        type: seal.type,
+        floating: {
+          horizontalPosition: {
+            relative: docx.HorizontalPositionRelativeFrom.PAGE,
+            offset: SEAL_H_OFFSET,
+          },
+          verticalPosition: {
+            relative: docx.VerticalPositionRelativeFrom.TOP_MARGIN,
+            offset: SEAL_V_OFFSET,
+          },
+          behindDocument: true,
+          lockAnchor: true,
+          allowOverlap: true,
+          wrap: { type: docx.TextWrappingType.NONE },
+        },
+      }),
+      makeRun(agencyTitle, {
+        bold: true,
+        allCaps: true,
+        size: lhSize(agencyTitle, 24),  // 12pt (HQDA: LHDA style sz=24)
+        font: 'Arial',
       }),
     ],
-    borders: {
-      top: { style: docx.BorderStyle.NONE, size: 0 },
-      bottom: { style: docx.BorderStyle.NONE, size: 0 },
-      left: { style: docx.BorderStyle.NONE, size: 0 },
-      right: { style: docx.BorderStyle.NONE, size: 0 },
-      insideHorizontal: { style: docx.BorderStyle.NONE, size: 0 },
-      insideVertical: { style: docx.BorderStyle.NONE, size: 0 },
-    },
   });
 
-  // Trailing paragraph with all borders explicitly NONE.
-  // This is the last element in the header — Word applies its default
-  // separator line to the bottom border of this paragraph. Setting it
-  // to NONE suppresses the line.
-  const noSeparatorPara = new docx.Paragraph({
-    spacing: { after: 0, before: 0, line: 20 },
-    border: {
-      top: { style: docx.BorderStyle.NONE, size: 0, space: 0, color: 'FFFFFF' },
-      bottom: { style: docx.BorderStyle.NONE, size: 0, space: 0, color: 'FFFFFF' },
-      left: { style: docx.BorderStyle.NONE, size: 0, space: 0, color: 'FFFFFF' },
-      right: { style: docx.BorderStyle.NONE, size: 0, space: 0, color: 'FFFFFF' },
-    },
+  const headerChildren = [firstPara];
+
+  // Unit/organization name: Arial Bold 10pt, ALL CAPS, centered
+  if (data.letterhead.unitName) {
+    const unitText = data.letterhead.unitName.toUpperCase();
+    headerChildren.push(new docx.Paragraph({
+      alignment: docx.AlignmentType.CENTER,
+      spacing: lhSpacing,
+      children: [makeRun(unitText, { bold: true, allCaps: true, size: lhSize(unitText, 20), font: 'Arial' })],
+    }));
+  }
+
+  // Sub-unit: Arial Bold 10pt, centered
+  if (data.letterhead.subUnit) {
+    headerChildren.push(new docx.Paragraph({
+      alignment: docx.AlignmentType.CENTER,
+      spacing: lhSpacing,
+      children: [makeRun(data.letterhead.subUnit.toUpperCase(), { bold: true, allCaps: true, size: 20, font: 'Arial' })],
+    }));
+  }
+
+  // Installation/address: Arial Bold 10pt, ALL CAPS, centered
+  if (data.letterhead.installation) {
+    headerChildren.push(new docx.Paragraph({
+      alignment: docx.AlignmentType.CENTER,
+      spacing: lhSpacing,
+      children: [makeRun(data.letterhead.installation.toUpperCase(), { bold: true, allCaps: true, size: 20, font: 'Arial' })],
+    }));
+  }
+
+  // Trailing empty paragraphs: push body down so office symbol clears the seal.
+  // The HQDA template has two empty Header-style paragraphs after the address,
+  // plus we add a third to ensure the body doesn't overlap the ~1.05" seal.
+  const noSepBorder = {
+    top: { style: docx.BorderStyle.NONE, size: 0, space: 0, color: 'FFFFFF' },
+    bottom: { style: docx.BorderStyle.NONE, size: 0, space: 0, color: 'FFFFFF' },
+    left: { style: docx.BorderStyle.NONE, size: 0, space: 0, color: 'FFFFFF' },
+    right: { style: docx.BorderStyle.NONE, size: 0, space: 0, color: 'FFFFFF' },
+  };
+  headerChildren.push(new docx.Paragraph({
+    spacing: { before: 0, after: 0, line: AR25_50.LINE },
+    border: noSepBorder,
     children: [],
-  });
+  }));
+  headerChildren.push(new docx.Paragraph({
+    spacing: { before: 0, after: 0, line: AR25_50.LINE },
+    border: noSepBorder,
+    children: [],
+  }));
+  // Extra line to clear the floating seal (~1.05" tall from top margin)
+  headerChildren.push(new docx.Paragraph({
+    spacing: { before: 0, after: 0, line: AR25_50.LINE },
+    border: noSepBorder,
+    children: [],
+  }));
 
   return new docx.Header({
-    children: [letterheadTable, noSeparatorPara],
+    children: headerChildren,
   });
 }
 
