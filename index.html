@@ -66,9 +66,8 @@ textarea { resize: vertical; min-height: 60px; }
 .doc-type-btn { padding: 0.5rem 1rem; border: 2px solid #d0d0d0; border-radius: 6px; background: #fff; cursor: pointer; font-size: 0.8rem; font-weight: 600; transition: all 0.2s; }
 .doc-type-btn:hover { border-color: #4a6fa5; }
 .doc-type-btn.active { border-color: #2d5a27; background: #eaf5e8; color: #2d5a27; }
-/* docx-preview renders into #previewDoc — these styles ensure proper display */
-#previewDoc .docx-wrapper { background: #f0f2f5 !important; padding: 1rem 0 !important; }
-#previewDoc .docx-wrapper > section.docx { box-shadow: 0 2px 8px rgba(0,0,0,0.15) !important; margin: 0 auto 1rem !important; }
+/* Preview iframe fills the container */
+#previewDoc iframe { display: block; }
 .para-number { font-size: 0.75rem; color: #717171; margin-right: 0.25rem; min-width: 1.5rem; text-align: right; margin-top: 0.6rem; }
 .para-block { margin-bottom: 0.75rem; border-left: 2px solid #e8e8e8; padding-left: 0.5rem; }
 .para-block .para-main { display: flex; gap: 0.5rem; align-items: flex-start; }
@@ -452,9 +451,9 @@ textarea { resize: vertical; min-height: 60px; }
         <button class="btn btn-outline btn-sm" onclick="updatePreview()">Refresh</button>
       </div>
     </div>
-    <div id="previewContainer" style="background:#fff;min-height:11in;box-shadow:0 2px 8px rgba(0,0,0,0.15)">
-      <div id="previewDoc" style="text-align:center;color:#717171;padding:3rem;font-style:italic">
-        Fill out the form and click Refresh to see a live preview of the DOCX
+    <div id="previewContainer">
+      <div id="previewDoc" style="text-align:center;color:#717171;padding:3rem;font-style:italic;background:#fff;min-height:400px;box-shadow:0 2px 8px rgba(0,0,0,0.15)">
+        Fill out the form and click Refresh to see a live preview
       </div>
     </div>
   </div>
@@ -24669,7 +24668,8 @@ function buildPageFooter() {
 // AR 25-50 para 2-4a(3)(b): date on same line as office symbol, flush right
 function buildOfficeSymbolAndDate(data) {
   const paras = [];
-  // Blank line at top of body to clear the floating seal in the header
+  // Two blank lines at top of body to clear the floating seal in the header
+  paras.push(emptyPara());
   paras.push(emptyPara());
 
   const dateStr = formatDateAR25(data.date);
@@ -25129,60 +25129,42 @@ function generateDocx() {
 }
 
 // ============================================
-// SECTION 11: DOCX Live Preview (renders actual Word document in browser)
-// Uses docx-preview library to render the same DOCX blob that gets downloaded
+// SECTION 11: Live Preview (renders PDF in iframe for accurate preview)
+// The PDF output uses the same layout logic as the DOCX, giving
+// a reliable preview without docx-preview rendering quirks.
 // ============================================
+let previewBlobUrl = null;
+
 function updatePreview() {
   const data = collectFormData();
   const container = document.getElementById('previewDoc');
   container.innerHTML = '<div style="text-align:center;color:#717171;padding:2rem;font-style:italic">Generating preview...</div>';
 
-  try {
-    const doc = buildDocxDocument(data);
-    docx.Packer.toBlob(doc).then(function(blob) {
-      return blob.arrayBuffer();
-    }).then(function(buffer) {
-      container.innerHTML = '';
-      return docxPreview.renderAsync(buffer, container, null, {
-        className: 'docx-preview-content',
-        inWrapper: true,
-        ignoreWidth: false,
-        ignoreHeight: false,
-        ignoreFonts: false,
-        breakPages: true,
-        ignoreLastRenderedPageBreak: true,
-        experimental: true,
-      });
-    }).catch(function(err) {
-      container.innerHTML = '<div style="text-align:center;color:#c0392b;padding:2rem">Preview error: ' + escapeHtml(err.message) + '</div>';
-      console.error('Preview error:', err);
-    });
-  } catch (err) {
+  // Clean up previous blob URL
+  if (previewBlobUrl) {
+    URL.revokeObjectURL(previewBlobUrl);
+    previewBlobUrl = null;
+  }
+
+  buildPdfBlob(data).then(function(blob) {
+    previewBlobUrl = URL.createObjectURL(blob);
+    container.innerHTML = '';
+    const iframe = document.createElement('iframe');
+    iframe.src = previewBlobUrl;
+    iframe.style.cssText = 'width:100%;height:11in;min-height:800px;border:none;background:#fff;';
+    container.appendChild(iframe);
+  }).catch(function(err) {
     container.innerHTML = '<div style="text-align:center;color:#c0392b;padding:2rem">Preview error: ' + escapeHtml(err.message) + '</div>';
     console.error('Preview error:', err);
-  }
+  });
 }
 
 // ============================================
 // SECTION 12: PDF Generation (with digital signature fields)
 // ============================================
 
-async function generatePdf() {
-  const data = collectFormData();
-
-  // Validate before generating
-  const { errors, warnings } = validateFormData(data);
-  if (errors.length > 0) {
-    showValidation(errors, warnings);
-    return;
-  }
-  if (warnings.length > 0 && !bypassWarnings) {
-    showValidation(errors, warnings);
-    return;
-  }
-  showValidation([], []);
-
-  try {
+// Build PDF blob from form data (reused by download and preview)
+async function buildPdfBlob(data) {
     const { PDFDocument, StandardFonts, rgb, PDFName, PDFAcroSignature, PDFRef } = PDFLib;
     const pdfDoc = await PDFDocument.create();
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);         // closest to Arial in PDF standard fonts
@@ -25665,10 +25647,27 @@ async function generatePdf() {
       drawPageFooter(pageNumber);
     }
     const pdfBytes = await pdfDoc.save();
-    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+    return new Blob([pdfBytes], { type: 'application/pdf' });
+}
+
+async function generatePdf() {
+  const data = collectFormData();
+
+  const { errors, warnings } = validateFormData(data);
+  if (errors.length > 0) {
+    showValidation(errors, warnings);
+    return;
+  }
+  if (warnings.length > 0 && !bypassWarnings) {
+    showValidation(errors, warnings);
+    return;
+  }
+  showValidation([], []);
+
+  try {
+    const blob = await buildPdfBlob(data);
     const subjectSlug = data.subject ? data.subject.substring(0, 30).replace(/[^a-zA-Z0-9]/g, '_') : 'draft';
     saveAs(blob, `Memo_${subjectSlug}.pdf`);
-
   } catch (err) {
     alert('Error generating PDF: ' + err.message);
     console.error(err);
