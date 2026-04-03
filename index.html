@@ -24572,6 +24572,69 @@ function buildLetterhead(data) {
   });
 }
 
+// Continuation page header (AR 25-50 para 2-5, HQDA template header1)
+// Contains: office symbol, then "SUBJECT: [subject] [signer name]" on one line
+function buildContinuationHeader(data, leftMargin) {
+  const noSepBorder = {
+    top: { style: docx.BorderStyle.NONE, size: 0, space: 0, color: 'FFFFFF' },
+    bottom: { style: docx.BorderStyle.NONE, size: 0, space: 0, color: 'FFFFFF' },
+    left: { style: docx.BorderStyle.NONE, size: 0, space: 0, color: 'FFFFFF' },
+    right: { style: docx.BorderStyle.NONE, size: 0, space: 0, color: 'FFFFFF' },
+  };
+
+  const children = [];
+
+  // Blank line
+  children.push(new docx.Paragraph({ spacing: { after: 0, before: 0 }, children: [] }));
+
+  // Office symbol
+  if (data.officeSymbol) {
+    children.push(makePara(makeRun(data.officeSymbol, { font: 'Arial', size: AR25_50.FONT_SIZE_HALF_PT })));
+  }
+
+  // SUBJECT: [subject text] [signer name] — all on one line
+  const subjectText = data.subject || data.originalSubject || '';
+  const signerName = data.signatureBlock ? data.signatureBlock.name : '';
+  const subjectLine = [];
+  subjectLine.push(makeRun('SUBJECT: ', { font: 'Arial', size: AR25_50.FONT_SIZE_HALF_PT }));
+  subjectLine.push(makeRun(subjectText + ' ', { font: 'Arial', size: AR25_50.FONT_SIZE_HALF_PT }));
+  if (signerName) {
+    subjectLine.push(makeRun(signerName, { font: 'Arial', size: AR25_50.FONT_SIZE_HALF_PT }));
+  }
+  children.push(new docx.Paragraph({
+    spacing: { after: 0, before: 0 },
+    border: noSepBorder,
+    children: subjectLine,
+  }));
+
+  // Empty trailing paragraph with no border (suppress separator)
+  children.push(new docx.Paragraph({
+    spacing: { after: 0, before: 0 },
+    border: noSepBorder,
+    children: [],
+  }));
+
+  return new docx.Header({ children });
+}
+
+// Page footer: centered page number (AR 25-50 para 2-5d)
+function buildPageFooter() {
+  return new docx.Footer({
+    children: [
+      new docx.Paragraph({
+        alignment: docx.AlignmentType.CENTER,
+        children: [
+          new docx.TextRun({
+            children: [docx.PageNumber.CURRENT],
+            font: AR25_50.FONT,
+            size: AR25_50.FONT_SIZE_HALF_PT,
+          }),
+        ],
+      }),
+    ],
+  });
+}
+
 // Office symbol (left) and date (right) on the SAME line
 // AR 25-50 para 2-4a(1): office symbol on 2nd line below seal
 // AR 25-50 para 2-4a(3)(b): date on same line as office symbol, flush right
@@ -24901,8 +24964,14 @@ function generateDocx() {
 
   let children = [];
 
-  // Letterhead as a proper Word Header element
-  const documentHeader = buildLetterhead(data);
+  // First-page header: letterhead with seal (AR 25-50 first page only)
+  const firstPageHeader = buildLetterhead(data);
+
+  // Continuation header: office symbol, subject, signer (AR 25-50 para 2-5, HQDA template header1)
+  const continuationHeader = buildContinuationHeader(data, leftMargin);
+
+  // Footer: centered page number (AR 25-50 para 2-5d)
+  const pageFooter = buildPageFooter();
 
   // Body starts with office symbol/date
   children.push(...buildOfficeSymbolAndDate(data));
@@ -25003,8 +25072,13 @@ function generateDocx() {
         },
       },
       headers: {
-        default: documentHeader,
+        default: continuationHeader,
+        first: firstPageHeader,
       },
+      footers: {
+        default: pageFooter,
+      },
+      titlePage: true,
       children: children,
     }],
   });
@@ -25028,23 +25102,25 @@ function updatePreview() {
   const preview = document.getElementById('previewDoc');
   let html = '';
 
-  // Letterhead with seal
+  // Letterhead with seal (matches DOCX: floating seal + centered Arial Bold ALL CAPS text)
   const seal = getSealData(data);
   const sealMime = seal.type === 'jpg' ? 'image/jpeg' : 'image/png';
   const agencyTitle = getAgencyTitle(data);
-  html += `<div style="display:flex;align-items:center;gap:0.5em;margin-bottom:6pt">`;
-  html += `<img src="data:${sealMime};base64,${seal.b64}" alt="Seal" style="width:62px;height:62px;flex-shrink:0">`;
-  html += `<div style="flex:1;text-align:center">`;
-  html += `<div class="letterhead" style="font-size:10pt">${escapeHtml(agencyTitle)}</div>`;
-  if (data.letterhead.unitName) html += `<div class="letterhead" style="font-size:9pt">${escapeHtml(data.letterhead.unitName.toUpperCase())}</div>`;
-  if (data.letterhead.subUnit) html += `<div style="text-align:center;font-size:9pt">${escapeHtml(data.letterhead.subUnit)}</div>`;
-  if (data.letterhead.installation) html += `<div style="text-align:center;font-size:9pt">${escapeHtml(data.letterhead.installation)}</div>`;
+  html += `<div style="position:relative;min-height:100px;margin-bottom:2pt">`;
+  // Floating seal (matches DOCX: 1.05" absolute positioned)
+  html += `<img src="data:${sealMime};base64,${seal.b64}" alt="Seal" style="position:absolute;left:0;top:50%;transform:translateY(-50%);width:100px;height:100px">`;
+  // Centered letterhead text (Arial Bold, ALL CAPS, tight line spacing)
+  html += `<div style="text-align:center;line-height:1.1">`;
+  html += `<div class="letterhead" style="font-size:12pt;font-family:Arial,Helvetica,sans-serif">${escapeHtml(agencyTitle)}</div>`;
+  if (data.letterhead.unitName) html += `<div class="letterhead" style="font-size:10pt;font-family:Arial,Helvetica,sans-serif">${escapeHtml(data.letterhead.unitName.toUpperCase())}</div>`;
+  if (data.letterhead.subUnit) html += `<div class="letterhead" style="font-size:10pt;font-family:Arial,Helvetica,sans-serif">${escapeHtml(data.letterhead.subUnit.toUpperCase())}</div>`;
+  if (data.letterhead.installation) html += `<div class="letterhead" style="font-size:10pt;font-family:Arial,Helvetica,sans-serif">${escapeHtml(data.letterhead.installation.toUpperCase())}</div>`;
   html += `</div>`;
-  html += `<div style="width:62px;flex-shrink:0"></div>`; // spacer for balance
   html += `</div>`;
-  // No separator line between letterhead and body
 
   // Office symbol (left) and date (right) on same line
+  // DOCX has emptyPara() before this to clear the floating seal
+  html += '<div class="spacer"></div>';
   html += `<div class="office-date-line"><span>${escapeHtml(data.officeSymbol || '')}</span><span>${escapeHtml(formatDateAR25(data.date))}</span></div>`;
 
   // Type-specific content (matches DOCX section builders exactly)
@@ -25106,11 +25182,11 @@ function updatePreview() {
       const prefix = (useNumbering && !single) ? `${i + 1}.  ` : '';
       html += `${spacers}<p>${escapeHtml(prefix + p.text)}</p>`;
 
-      // Sub-paragraphs (a., b., c.)
+      // Sub-paragraphs (a., b., c.) — matches DOCX buildBodyParagraphs
       if (p.subParagraphs && p.subParagraphs.length > 0) {
         p.subParagraphs.forEach((sp, j) => {
           const spText = typeof sp === 'string' ? sp : sp.text;
-          if (!spText) return;
+          if (!spText && (!sp.subSubParagraphs || sp.subSubParagraphs.length === 0)) return;
           const letter = String.fromCharCode(97 + j);
           html += `<div class="spacer"></div><p style="margin-left:0.25in">${escapeHtml(letter + '.  ' + spText)}</p>`;
 
@@ -25397,7 +25473,7 @@ async function generatePdf() {
     }
 
     // === LETTERHEAD ===
-    // Mirrors the DOCX 3-column table: [0.9" seal] [center text] [0.9" spacer]
+    // Matches DOCX: floating 1.05" seal + full-width centered Arial Bold ALL CAPS text
     const seal = getSealData(data);
     const sealBytes = Uint8Array.from(atob(seal.b64), c => c.charCodeAt(0));
     let sealImage;
@@ -25406,58 +25482,69 @@ async function generatePdf() {
     } else {
       sealImage = await pdfDoc.embedPng(sealBytes);
     }
-    const sealSize = AR25_50.SEAL_SIZE * PT;
 
-    // Letterhead text area: centered between the two 0.9" columns (matches DOCX)
-    const lhTextLeft = leftMargin + LH_COL_W;
-    const lhTextRight = PAGE_W - rightMargin - LH_COL_W;
-    const lhTextWidth = lhTextRight - lhTextLeft;
+    // DOCX seal: 1.05" (995680 EMU), positioned at 0.47" from page edge, 0.5" from top margin
+    const SEAL_SIZE_IN = 1.05;
+    const sealSizePt = SEAL_SIZE_IN * PT;
+    const SEAL_H_OFFSET = 0.47 * PT; // from page left edge
+    const SEAL_V_OFFSET = topMargin + 0.5 * PT; // from page top (into margin area)
+
+    // Embed font for letterhead (pdf-lib only has TimesRoman/TimesRomanBold built in;
+    // we use fontBold as the best match for Arial Bold)
     const agencyTitle = getAgencyTitle(data);
 
-    // Measure the letterhead text block height first so we can vertically center the seal
-    const LH_LINE = 11; // consistent line height for letterhead text
-    const lhLines = [{ text: agencyTitle, f: fontBold, size: 10 }];
-    if (data.letterhead.unitName) lhLines.push({ text: data.letterhead.unitName.toUpperCase(), f: fontBold, size: 9 });
-    if (data.letterhead.subUnit) lhLines.push({ text: data.letterhead.subUnit, f: font, size: 9 });
-    if (data.letterhead.installation) lhLines.push({ text: data.letterhead.installation, f: font, size: 9 });
-    const lhTextHeight = lhLines.length * LH_LINE;
+    // Build letterhead lines: Arial Bold ALL CAPS (matches DOCX buildLetterhead)
+    const LH_LINE = 13; // tight line height for letterhead text
+    const lhLines = [];
+    lhLines.push({ text: agencyTitle, size: 12 }); // DOCX: sz=24 (12pt)
+    if (data.letterhead.unitName) lhLines.push({ text: data.letterhead.unitName.toUpperCase(), size: 10 });
+    if (data.letterhead.subUnit) lhLines.push({ text: data.letterhead.subUnit.toUpperCase(), size: 10 });
+    if (data.letterhead.installation) lhLines.push({ text: data.letterhead.installation.toUpperCase(), size: 10 });
 
-    // The row height is the taller of the seal or text block
-    const lhRowHeight = Math.max(sealSize, lhTextHeight);
-
-    // Draw seal vertically centered in the row
-    const sealX = leftMargin;
-    const sealY = cursorY - (lhRowHeight + sealSize) / 2;
-    page.drawImage(sealImage, {
-      x: sealX,
-      y: sealY,
-      width: sealSize,
-      height: sealSize,
-    });
-
-    // Draw letterhead text lines, vertically centered in the row
-    let lhCursorY = cursorY - (lhRowHeight - lhTextHeight) / 2;
+    // Word-wrap each letterhead line if needed, then flatten into drawable lines
+    const lhDrawLines = [];
     for (const ln of lhLines) {
       let size = ln.size;
-      // Auto-shrink if text overflows the center column
-      while (ln.f.widthOfTextAtSize(ln.text, size) > lhTextWidth && size > 6) {
+      // Auto-shrink first (min 7pt)
+      while (fontBold.widthOfTextAtSize(ln.text, size) > textWidth && size > 7) {
         size -= 0.5;
       }
-      const w = ln.f.widthOfTextAtSize(ln.text, size);
+      // Word-wrap if still too wide
+      const wrapped = wrapText(ln.text, fontBold, size, textWidth);
+      wrapped.forEach(line => lhDrawLines.push({ text: line, size }));
+    }
+    const lhTextHeight = lhDrawLines.length * LH_LINE;
+
+    // Draw seal — positioned absolutely like the DOCX floating anchor
+    // Vertically centered relative to the text block
+    const sealDrawY = cursorY - Math.max(lhTextHeight, sealSizePt) / 2 - sealSizePt / 2;
+    page.drawImage(sealImage, {
+      x: SEAL_H_OFFSET,
+      y: sealDrawY,
+      width: sealSizePt,
+      height: sealSizePt,
+    });
+
+    // Draw centered letterhead text across full page width
+    let lhCursorY = cursorY;
+    for (const ln of lhDrawLines) {
+      const w = fontBold.widthOfTextAtSize(ln.text, ln.size);
       page.drawText(ln.text, {
-        x: lhTextLeft + (lhTextWidth - w) / 2,
-        y: lhCursorY - size,
-        size,
-        font: ln.f,
+        x: leftMargin + (textWidth - w) / 2,
+        y: lhCursorY - ln.size,
+        size: ln.size,
+        font: fontBold,
         color: rgb(0, 0, 0),
       });
       lhCursorY -= LH_LINE;
     }
 
-    // Advance cursor past the full letterhead row
-    cursorY -= lhRowHeight;
+    // Advance cursor past the taller of seal or text
+    cursorY -= Math.max(lhTextHeight, sealSizePt);
 
     // === OFFICE SYMBOL & DATE ===
+    // DOCX has emptyPara() before office symbol to clear the floating seal
+    blankLine();
     drawTextPair(data.officeSymbol || '', formatDateAR25(data.date));
 
     // === TYPE-SPECIFIC SECTIONS ===
@@ -25496,13 +25583,21 @@ async function generatePdf() {
         break;
 
       case 'endorsement':
-        sectionGap(2, 1);
+        // DOCX buildEndorsementHeader: 1 blank, centered text, 1 blank, endorsing office
+        // Then buildMemoForLine: 2 blanks, MEMORANDUM FOR
+        sectionGap(1, 1);
         drawText(ordinalEndorsement(data.endorsementNumber || 1).toUpperCase() + ' ENDORSEMENT', { align: 'center' });
         sectionGap(1, 1);
         if (data.endorsingOffice) drawText(data.endorsingOffice);
         sectionGap(2, 1);
         if (data.memorandumFor.length > 0) {
           drawText('MEMORANDUM FOR ' + data.memorandumFor[0]);
+        }
+        if (data.thru.length > 0) {
+          data.thru.forEach((addr, i) => {
+            if (i === 0) drawText('THRU ' + addr);
+            else drawText(addr, { x: leftMargin + 0.5 * PT });
+          });
         }
         if (data.originalSubject) {
           sectionGap(1, 1);
